@@ -124,7 +124,6 @@ export function StudyVaultManager() {
     } finally {
       setLoadingDriveAccounts(false);
     }
-    }
   }
 
   async function fetchSemesters() {
