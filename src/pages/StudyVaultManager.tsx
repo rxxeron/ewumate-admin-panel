@@ -111,6 +111,22 @@ export function StudyVaultManager() {
     }
   }
 
+  async function handleRecalculateQuota() {
+    setLoadingDriveAccounts(true);
+    try {
+      const { error } = await supabase.rpc('recalculate_drive_storage_used');
+      if (error) throw error;
+      await fetchDriveAccounts();
+      toast.success('Storage quotas synchronized with active database materials.');
+    } catch (err: any) {
+      console.error('Recalculate quota failed:', err);
+      toast.error(err.message || 'Failed to recalculate quota');
+    } finally {
+      setLoadingDriveAccounts(false);
+    }
+    }
+  }
+
   async function fetchSemesters() {
     try {
       const { data, error } = await supabase
@@ -593,6 +609,15 @@ export function StudyVaultManager() {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loadingDriveAccounts ? 'animate-spin' : ''}`} />
             Sync Storage Nodes
+          </button>
+          <button
+            onClick={handleRecalculateQuota}
+            disabled={loadingDriveAccounts}
+            className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 text-xs font-bold uppercase tracking-wider rounded-xl transition-all border border-indigo-500/30 shadow-sm active:scale-95 disabled:opacity-50"
+            title="Recalculate exact disk usage across accounts based on active study materials"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingDriveAccounts ? 'animate-spin' : ''}`} />
+            Recalculate Quotas
           </button>
         </div>
 
