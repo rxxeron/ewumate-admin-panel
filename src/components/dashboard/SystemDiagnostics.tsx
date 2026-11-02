@@ -31,16 +31,16 @@ export function SystemDiagnostics() {
       const latency = endDb - startDb;
       
       let status = 'Optimized';
-      let color = 'bg-primary text-white';
+      let color = 'bg-emerald-500 text-white';
       if (error) {
         status = 'Error';
         color = 'bg-destructive text-destructive-foreground';
       } else if (latency > 1000) {
         status = 'Lagging';
-        color = 'bg-primary text-white';
+        color = (latency > 1000) ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white';
       } else if (latency > 300) {
         status = 'Operational';
-        color = 'bg-primary text-white';
+        color = (latency > 1000) ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white';
       }
       
       setInfraStatus(prev => ({ ...prev, db: status }));
@@ -57,7 +57,7 @@ export function SystemDiagnostics() {
       });
       if (!res.error) {
         setInfraStatus(prev => ({ ...prev, scraper: 'Healthy', azure: 'Live' }));
-        setInfraColors(prev => ({ ...prev, scraper: 'bg-primary text-white', azure: 'bg-primary text-white' }));
+        setInfraColors(prev => ({ ...prev, scraper: 'bg-emerald-500 text-white', azure: 'bg-emerald-500 text-white' }));
       } else {
         setInfraStatus(prev => ({ ...prev, scraper: 'Issues', azure: 'Down' }));
         setInfraColors(prev => ({ ...prev, scraper: 'bg-destructive text-destructive-foreground', azure: 'bg-destructive text-destructive-foreground' }));

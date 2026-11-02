@@ -525,7 +525,7 @@ export function Dashboard() {
                 onClick={() => toggleTrackState(track, 'is_advising_open', data.is_advising_open)}
                 className={`p-3.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between group/toggle ${
                   data.is_advising_open 
-                    ? 'bg-primary/10/50 dark:bg-primary/10 border-primary/20/50 dark:border-primary/20 shadow-sm' 
+                    ? 'bg-primary/10 dark:bg-primary/10 border-primary/20 dark:border-primary/20 shadow-sm' 
                     : 'bg-card border-border hover:border-slate-200 dark:hover:border-border'
                 }`}
               >
@@ -551,7 +551,7 @@ export function Dashboard() {
                 onClick={() => toggleTrackState(track, 'is_next_semester_open', data.is_next_semester_open)}
                 className={`p-3.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between group/toggle ${
                   data.is_next_semester_open 
-                    ? 'bg-primary/10/50 dark:bg-primary/10 border-primary/20/50 dark:border-primary/20 shadow-sm' 
+                    ? 'bg-primary/10 dark:bg-primary/10 border-primary/20 dark:border-primary/20 shadow-sm' 
                     : 'bg-card border-border hover:border-slate-200 dark:hover:border-border'
                 }`}
               >

@@ -4,12 +4,18 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - production
       - main
       - master
-      - testing
     paths:
-      - 'admin_panel/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tailwind.config.js'
+      - 'postcss.config.js'
+      - 'tsconfig*.json'
       - '.github/workflows/deploy-admin.yml'
 
 permissions:
@@ -24,46 +30,35 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    environment: github-pages
-    defaults:
-      run:
-        working-directory: ./admin_panel
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node.js LTS
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: 'npm'
-          cache-dependency-path: './admin_panel/package-lock.json'
+          cache-dependency-path: './package-lock.json'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Build the Admin Panel
+      - name: Build Admin Panel
         run: npm run build
         env:
-          # If your Vite project needs access to Supabase variables publicly on the web URL,
-          # you can optionally inject them here via GitHub Repository Secrets.
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.VITE_SUPABASE_SERVICE_ROLE_KEY }}
           VITE_AZURE_FUNCTION_URL: ${{ secrets.VITE_AZURE_FUNCTION_URL }}
           NODE_ENV: production
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
 
-      - name: Upload artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Pointing to the dist folder inside the working-directory
-          path: './admin_panel/dist'
+          path: './dist'
 
   deploy:
     environment:

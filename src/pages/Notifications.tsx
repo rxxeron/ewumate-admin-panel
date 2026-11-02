@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabaseAdmin as supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
 import { 
   RefreshCw, Send, Link as LinkIcon, Clock, Building, Target, BookmarkPlus, 

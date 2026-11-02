@@ -1,6 +1,7 @@
+import { useDatabaseOptions } from '../hooks/useDatabaseOptions';
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { supabaseAdmin as supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import { 
   ArrowLeft, RefreshCw, Users, CheckCircle2, Clipboard, 
   CalendarClock, AlertTriangle, Clock, Edit, Save, 
