@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ShieldAlert, Loader2, LogOut } from 'lucide-react';
+import { ShieldAlert, Loader2, LogOut, RefreshCw } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 
 export function AuthGuard() {
@@ -10,34 +10,43 @@ export function AuthGuard() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [showFailsafeAction, setShowFailsafeAction] = useState(false);
+  const isMountedRef = useRef(true);
 
   const checkUserAdmin = useCallback(async (user: User): Promise<boolean> => {
     try {
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 3500)
+      );
+
       // Primary check: Execute secure server-side RPC is_admin()
-      const { data: rpcAdmin, error: rpcError } = await supabase.rpc('is_admin');
-      if (!rpcError && typeof rpcAdmin === 'boolean') {
-        return rpcAdmin;
+      const rpcPromise = supabase.rpc('is_admin');
+      const rpcResult = await Promise.race([rpcPromise, timeoutPromise]);
+
+      if (rpcResult && !rpcResult.error && typeof rpcResult.data === 'boolean') {
+        return rpcResult.data;
       }
 
       // Fallback check: Direct query to admin_users table under authenticated session
-      const { data: adminRecord, error: tableError } = await supabase
+      const queryPromise = supabase
         .from('admin_users')
         .select('id, user_id')
         .eq('user_id', user.id)
         .maybeSingle();
 
-      return !tableError && !!adminRecord;
+      const queryResult = await Promise.race([queryPromise, timeoutPromise]);
+
+      return Boolean(queryResult && !queryResult.error && queryResult.data);
     } catch {
       return false;
     }
   }, []);
 
-  const initAuth = useCallback(async () => {
-    try {
-      // Retrieve the existing session stored in localStorage
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  const verifySession = useCallback(
+    async (session: any) => {
+      if (!isMountedRef.current) return;
 
-      if (sessionError || !session || !session.user) {
+      if (!session || !session.user) {
         setCurrentUser(null);
         setIsAdmin(false);
         setLoading(false);
@@ -50,57 +59,150 @@ export function AuthGuard() {
       // Verify admin authorization
       const hasAdminRights = await checkUserAdmin(user);
 
+      if (!isMountedRef.current) return;
+
       if (hasAdminRights) {
         setIsAdmin(true);
         setAuthError('');
       } else {
         setIsAdmin(false);
         setAuthError(
-          `Access Denied: Account '${user.email}' is authenticated, but is not authorized in the admin directory.`
+          `Access Denied: Account '${user.email || user.id}' is authenticated, but is not authorized in the admin directory.`
         );
       }
-    } catch (err: any) {
-      setCurrentUser(null);
-      setIsAdmin(false);
-      setAuthError(err?.message || 'Authentication error occurred.');
-    } finally {
       setLoading(false);
-    }
-  }, [checkUserAdmin]);
+    },
+    [checkUserAdmin]
+  );
 
   useEffect(() => {
-    // Initial session hydration
-    initAuth();
+    isMountedRef.current = true;
 
-    // Listen only to actual state change events (SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED)
-    // Do NOT trigger sign-out or cancel loading on INITIAL_SESSION
+    // Show manual unstick actions if verification takes longer than 2.5 seconds
+    const actionTimer = setTimeout(() => {
+      if (isMountedRef.current) {
+        setShowFailsafeAction(true);
+      }
+    }, 2500);
+
+    // Hard absolute safety timeout: never stay in loading state longer than 4.5 seconds
+    const safetyTimer = setTimeout(() => {
+      if (isMountedRef.current) {
+        setLoading((prev) => {
+          if (prev) {
+            console.warn('AuthGuard safety timeout triggered.');
+            return false;
+          }
+          return false;
+        });
+      }
+    }, 4500);
+
+    // 1. Initial session check with timeout protection against deadlocks
+    const init = async () => {
+      try {
+        const timeoutPromise = new Promise<any>((resolve) =>
+          setTimeout(() => resolve({ data: { session: null } }), 3500)
+        );
+
+        const { data } = await Promise.race([
+          supabase.auth.getSession(),
+          timeoutPromise,
+        ]);
+
+        await verifySession(data?.session);
+      } catch (err: any) {
+        if (isMountedRef.current) {
+          setCurrentUser(null);
+          setIsAdmin(false);
+          setAuthError(err?.message || 'Authentication error occurred.');
+          setLoading(false);
+        }
+      }
+    };
+
+    init();
+
+    // 2. Synchronous auth state listener to avoid Web Lock deadlock
+    // IMPORTANT: DO NOT use an async callback inside onAuthStateChange!
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-        setIsAdmin(false);
-        setLoading(false);
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (session?.user) {
-          setCurrentUser(session.user);
-          const hasAdmin = await checkUserAdmin(session.user);
-          setIsAdmin(hasAdmin);
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'INITIAL_SESSION') {
+        return;
+      }
+
+      if (event === 'SIGNED_OUT' || !session) {
+        if (isMountedRef.current) {
+          setCurrentUser(null);
+          setIsAdmin(false);
+          setLoading(false);
         }
-        setLoading(false);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // Defer outside the Supabase onAuthStateChange lock via setTimeout
+        setTimeout(() => {
+          verifySession(session);
+        }, 0);
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, [initAuth, checkUserAdmin]);
+    return () => {
+      isMountedRef.current = false;
+      clearTimeout(actionTimer);
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
+    };
+  }, [verifySession]);
+
+  const handleForceReset = async () => {
+    try {
+      localStorage.removeItem('ewumate_admin_auth');
+      await supabase.auth.signOut();
+    } catch {
+      // ignore
+    } finally {
+      window.location.href = '/login';
+    }
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-3">
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4 p-4 text-center">
         <Loader2 className="w-8 h-8 text-primary animate-spin" />
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
-          Verifying security credentials...
-        </p>
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
+            Verifying security credentials...
+          </p>
+          <p className="text-[11px] text-muted-foreground/70">
+            Validating encrypted session and administrative role
+          </p>
+        </div>
+
+        {showFailsafeAction && (
+          <div className="mt-4 flex flex-col items-center gap-2 animate-in fade-in duration-300">
+            <p className="text-xs text-amber-500 font-medium">
+              Verification is taking longer than expected.
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={handleForceReset}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Reset & Go to Login
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -126,10 +228,7 @@ export function AuthGuard() {
             </p>
           </div>
           <button
-            onClick={async () => {
-              await supabase.auth.signOut();
-              window.location.href = '/login';
-            }}
+            onClick={handleForceReset}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors shadow-sm"
           >
             <LogOut className="w-4 h-4" />

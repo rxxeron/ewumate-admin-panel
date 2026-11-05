@@ -14,11 +14,24 @@ export function Login() {
   const targetDestination = (location.state as any)?.from?.pathname || '/';
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        navigate(targetDestination, { replace: true });
-      }
-    });
+    let isMounted = true;
+    const timeoutPromise = new Promise<any>((resolve) =>
+      setTimeout(() => resolve({ data: { session: null } }), 3000)
+    );
+
+    Promise.race([supabase.auth.getSession(), timeoutPromise])
+      .then(({ data }) => {
+        if (isMounted && data?.session) {
+          navigate(targetDestination, { replace: true });
+        }
+      })
+      .catch(() => {
+        // Ignore timeout or session errors on login screen
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [navigate, targetDestination]);
 
   const handleLogin = async (e: React.FormEvent) => {
