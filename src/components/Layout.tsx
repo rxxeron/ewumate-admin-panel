@@ -123,8 +123,12 @@ export function Layout() {
     fetchBadges();
     pingEdgeLatency();
 
-    const badgeInterval = setInterval(fetchBadges, 25000);
-    const latencyInterval = setInterval(pingEdgeLatency, 45000);
+    const badgeInterval = setInterval(() => {
+      if (!document.hidden) fetchBadges();
+    }, 120000);
+    const latencyInterval = setInterval(() => {
+      if (!document.hidden) pingEdgeLatency();
+    }, 300000);
 
     return () => {
       clearInterval(badgeInterval);
