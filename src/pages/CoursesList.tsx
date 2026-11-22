@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { BookOpen, Search, ChevronLeft, ChevronRight, Zap, X } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { motion } from 'framer-motion';
 import type { CourseSection } from '../types';
 import { Skeleton } from '../components/Skeleton';
@@ -16,14 +17,15 @@ import { Select } from '../components/ui/Select';
 export function CoursesList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [courses, setCourses] = useState<CourseSection[]>([]);
-  const { semesters, faculty } = useDatabaseOptions();
+  const { semesters, faculty, loading: optionsLoading } = useDatabaseOptions();
   const [selectedSemester, setSelectedSemester] = useState<string>('');
   const [selectedFaculty, setSelectedFaculty] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [totalCourses, setTotalCourses] = useState(0);
 
   const searchTerm = searchParams.get('q') || '';
-  const page = parseInt(searchParams.get('page') || '0');
+  const rawPage = Number.parseInt(searchParams.get('page') || '0', 10);
+  const page = Number.isNaN(rawPage) || rawPage < 0 ? 0 : rawPage;
   const pageSize = 25;
 
   const setPage = (p: number | ((prev: number) => number)) => {
@@ -44,8 +46,10 @@ export function CoursesList() {
     if (semesters.length > 0 && !selectedSemester) {
       const active = semesters.find(s => s.isActive);
       setSelectedSemester(active ? active.code : semesters[0].code);
+    } else if (!optionsLoading && semesters.length === 0) {
+      setLoading(false);
     }
-  }, [semesters, selectedSemester]);
+  }, [semesters, selectedSemester, optionsLoading]);
 
   useEffect(() => {
     if (selectedSemester) {
@@ -78,14 +82,16 @@ export function CoursesList() {
 
       const { data, error, count } = await query;
 
-      if (!error && data) {
-        setCourses(data);
-        if (count !== null) setTotalCourses(count);
-      } else {
+      if (error) {
+        toast.error(`Failed to load ${tableName}: ${error.message}`);
         setCourses([]);
         setTotalCourses(0);
+      } else {
+        setCourses(data || []);
+        if (count !== null) setTotalCourses(count);
       }
-    } catch {
+    } catch (err: unknown) {
+      toast.error(`Failed to load courses: ${err instanceof Error ? err.message : 'Unknown error'}`);
       setCourses([]);
       setTotalCourses(0);
     } finally {

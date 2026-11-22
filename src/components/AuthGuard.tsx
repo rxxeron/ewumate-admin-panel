@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ShieldAlert, Loader2, LogOut, RefreshCw } from 'lucide-react';
-import type { User } from '@supabase/supabase-js';
+import { Loader2, LogOut, RefreshCw } from 'lucide-react';
+import type { Session, User } from '@supabase/supabase-js';
+
+type AdminCheckStatus = 'authorized' | 'unauthorized' | 'error';
 
 export function AuthGuard() {
   const location = useLocation();
@@ -10,45 +12,50 @@ export function AuthGuard() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [networkError, setNetworkError] = useState(false);
   const [showFailsafeAction, setShowFailsafeAction] = useState(false);
   const isMountedRef = useRef(true);
 
-  const checkUserAdmin = useCallback(async (user: User): Promise<boolean> => {
+  const checkUserAdmin = useCallback(async (user: User): Promise<AdminCheckStatus> => {
+    const TIMEOUT = Symbol('timeout');
+    const withTimeout = <T,>(p: PromiseLike<T>, ms: number) =>
+      Promise.race([Promise.resolve(p), new Promise<typeof TIMEOUT>((resolve) => setTimeout(() => resolve(TIMEOUT), ms))]);
+
     try {
-      const timeoutPromise = new Promise<null>((resolve) =>
-        setTimeout(() => resolve(null), 3500)
-      );
-
       // Primary check: Execute secure server-side RPC is_admin()
-      const rpcPromise = supabase.rpc('is_admin');
-      const rpcResult = await Promise.race([rpcPromise, timeoutPromise]);
-
-      if (rpcResult && !rpcResult.error && typeof rpcResult.data === 'boolean') {
-        return rpcResult.data;
+      const rpcResult = await withTimeout(supabase.rpc('is_admin'), 8000);
+      if (rpcResult !== TIMEOUT && !rpcResult.error && typeof rpcResult.data === 'boolean') {
+        return rpcResult.data ? 'authorized' : 'unauthorized';
       }
 
       // Fallback check: Direct query to admin_users table under authenticated session
-      const queryPromise = supabase
-        .from('admin_users')
-        .select('id, user_id')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      const queryResult = await withTimeout(
+        supabase
+          .from('admin_users')
+          .select('id, user_id')
+          .eq('user_id', user.id)
+          .maybeSingle(),
+        8000
+      );
 
-      const queryResult = await Promise.race([queryPromise, timeoutPromise]);
+      if (queryResult === TIMEOUT || queryResult.error) {
+        return 'error';
+      }
 
-      return Boolean(queryResult && !queryResult.error && queryResult.data);
+      return queryResult.data ? 'authorized' : 'unauthorized';
     } catch {
-      return false;
+      return 'error';
     }
   }, []);
 
   const verifySession = useCallback(
-    async (session: any) => {
+    async (session: Session | null) => {
       if (!isMountedRef.current) return;
 
       if (!session || !session.user) {
         setCurrentUser(null);
         setIsAdmin(false);
+        setNetworkError(false);
         setLoading(false);
         return;
       }
@@ -57,18 +64,30 @@ export function AuthGuard() {
       setCurrentUser(user);
 
       // Verify admin authorization
-      const hasAdminRights = await checkUserAdmin(user);
+      const status = await checkUserAdmin(user);
 
       if (!isMountedRef.current) return;
 
-      if (hasAdminRights) {
+      if (status === 'authorized') {
         setIsAdmin(true);
         setAuthError('');
+        setNetworkError(false);
+      } else if (status === 'error') {
+        // Transient timeout or network error: do NOT sign out a valid admin session.
+        setNetworkError(true);
+        setShowFailsafeAction(true);
       } else {
+        // Explicitly unauthorized: revoke session immediately
+        try {
+          localStorage.removeItem('ewumate_admin_auth');
+          await supabase.auth.signOut();
+        } catch {
+          // ignore
+        }
         setIsAdmin(false);
-        setAuthError(
-          `Access Denied: Account '${user.email || user.id}' is authenticated, but is not authorized in the admin directory.`
-        );
+        setCurrentUser(null);
+        setNetworkError(false);
+        setAuthError('Access Denied: You do not have administrator permissions to access this console.');
       }
       setLoading(false);
     },
@@ -78,44 +97,37 @@ export function AuthGuard() {
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Show manual unstick actions if verification takes longer than 2.5 seconds
+    // Show manual retry/reset actions if verification takes longer than 3 seconds
     const actionTimer = setTimeout(() => {
       if (isMountedRef.current) {
         setShowFailsafeAction(true);
       }
-    }, 2500);
-
-    // Hard absolute safety timeout: never stay in loading state longer than 4.5 seconds
-    const safetyTimer = setTimeout(() => {
-      if (isMountedRef.current) {
-        setLoading((prev) => {
-          if (prev) {
-            console.warn('AuthGuard safety timeout triggered.');
-            return false;
-          }
-          return false;
-        });
-      }
-    }, 4500);
+    }, 3000);
 
     // 1. Initial session check with timeout protection against deadlocks
     const init = async () => {
       try {
-        const timeoutPromise = new Promise<any>((resolve) =>
-          setTimeout(() => resolve({ data: { session: null } }), 3500)
-        );
-
-        const { data } = await Promise.race([
+        const TIMEOUT = Symbol('timeout');
+        const res = await Promise.race([
           supabase.auth.getSession(),
-          timeoutPromise,
+          new Promise<typeof TIMEOUT>((resolve) => setTimeout(() => resolve(TIMEOUT), 6000)),
         ]);
 
-        await verifySession(data?.session);
-      } catch (err: any) {
+        if (res === TIMEOUT) {
+          if (isMountedRef.current) {
+            setNetworkError(true);
+            setShowFailsafeAction(true);
+            setLoading(false);
+          }
+          return;
+        }
+
+        await verifySession(res.data?.session ?? null);
+      } catch (err: unknown) {
         if (isMountedRef.current) {
           setCurrentUser(null);
           setIsAdmin(false);
-          setAuthError(err?.message || 'Authentication error occurred.');
+          setAuthError(err instanceof Error ? err.message : 'Authentication error occurred.');
           setLoading(false);
         }
       }
@@ -136,6 +148,7 @@ export function AuthGuard() {
         if (isMountedRef.current) {
           setCurrentUser(null);
           setIsAdmin(false);
+          setNetworkError(false);
           setLoading(false);
         }
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -149,7 +162,6 @@ export function AuthGuard() {
     return () => {
       isMountedRef.current = false;
       clearTimeout(actionTimer);
-      clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };
   }, [verifySession]);
@@ -165,20 +177,22 @@ export function AuthGuard() {
     }
   };
 
-  if (loading) {
+  if (loading || networkError) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4 p-4 text-center">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        {loading ? <Loader2 className="w-8 h-8 text-primary animate-spin" /> : null}
         <div className="space-y-1">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">
-            Verifying security credentials...
+            {networkError ? 'Unable to verify admin session' : 'Verifying security credentials...'}
           </p>
           <p className="text-[11px] text-muted-foreground/70">
-            Validating encrypted session and administrative role
+            {networkError
+              ? 'Check your network connection and retry. Your session was not cleared.'
+              : 'Validating encrypted session and administrative role'}
           </p>
         </div>
 
-        {showFailsafeAction && (
+        {(showFailsafeAction || networkError) && (
           <div className="mt-4 flex flex-col items-center gap-2 animate-in fade-in duration-300">
             <p className="text-xs text-amber-500 font-medium">
               Verification is taking longer than expected.
@@ -207,36 +221,8 @@ export function AuthGuard() {
     );
   }
 
-  if (authError && currentUser && !isAdmin) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-card border border-destructive/30 rounded-xl p-8 shadow-xl text-center space-y-6">
-          <div className="w-14 h-14 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
-            <ShieldAlert className="w-7 h-7" />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-xl font-bold text-foreground">Access Restricted</h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {authError}
-            </p>
-          </div>
-          <div className="p-3 bg-muted/60 border border-border rounded-lg text-xs text-muted-foreground text-left">
-            <span className="font-semibold text-foreground">Tip for System Administrators:</span>
-            <p className="mt-1">
-              Add your user ID (<code className="font-mono text-primary text-[11px]">{currentUser.id}</code>) to the{' '}
-              <code className="font-mono text-[11px]">admin_users</code> table in Supabase.
-            </p>
-          </div>
-          <button
-            onClick={handleForceReset}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors shadow-sm"
-          >
-            <LogOut className="w-4 h-4" />
-            Sign Out & Return to Login
-          </button>
-        </div>
-      </div>
-    );
+  if (authError && !isAdmin) {
+    return <Navigate to="/login" state={{ error: authError }} replace />;
   }
 
   if (!currentUser || !isAdmin) {

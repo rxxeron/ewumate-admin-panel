@@ -3,12 +3,12 @@ import { supabase } from '../lib/supabase';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 export function Login() {
-  const [error, setError] = useState('');
+  const location = useLocation();
+  const [error, setError] = useState<string>((location.state as any)?.error || '');
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
-  const location = useLocation();
 
   // Preserve and restore the user's intended target route if redirected
   const targetDestination = (location.state as any)?.from?.pathname || '/';
@@ -20,9 +20,18 @@ export function Login() {
     );
 
     Promise.race([supabase.auth.getSession(), timeoutPromise])
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         if (isMounted && data?.session) {
-          navigate(targetDestination, { replace: true });
+          const { data: isAdmin } = await supabase.rpc('is_admin');
+          if (isAdmin) {
+            navigate(targetDestination, { replace: true });
+          } else {
+            await supabase.auth.signOut();
+            localStorage.removeItem('ewumate_admin_auth');
+            if (isMounted) {
+              setError('Access Denied: This console is restricted to authorized administrators only.');
+            }
+          }
         }
       })
       .catch(() => {
@@ -39,17 +48,37 @@ export function Login() {
     setLoading(true);
     setError('');
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
       setError(error.message);
-    } else {
-      navigate(targetDestination, { replace: true });
+      setLoading(false);
+      return;
     }
 
+    if (data.session) {
+      const { data: isAdmin } = await supabase.rpc('is_admin');
+      if (!isAdmin) {
+        const { data: adminRecord } = await supabase
+          .from('admin_users')
+          .select('id')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+
+        if (!adminRecord) {
+          await supabase.auth.signOut();
+          localStorage.removeItem('ewumate_admin_auth');
+          setError('Access Denied: This console is restricted to authorized administrators only.');
+          setLoading(false);
+          return;
+        }
+      }
+    }
+
+    navigate(targetDestination, { replace: true });
     setLoading(false);
   };
 

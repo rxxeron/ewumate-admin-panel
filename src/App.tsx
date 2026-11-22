@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthGuard } from './components/AuthGuard';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -225,6 +225,7 @@ function App() {
                 />
               </Route>
             </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ConfirmProvider>
       </ErrorBoundary>

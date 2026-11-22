@@ -23,6 +23,8 @@ export function SystemDiagnostics() {
     setIsCheckingHealth(true);
     const toastId = toast.loading('Running system diagnostics...');
     
+    let hasFailures = false;
+
     // 1. Check DB Edge Latency
     const startDb = performance.now();
     try {
@@ -33,19 +35,21 @@ export function SystemDiagnostics() {
       let status = 'Optimized';
       let color = 'bg-emerald-500 text-white';
       if (error) {
+        hasFailures = true;
         status = 'Error';
         color = 'bg-destructive text-destructive-foreground';
       } else if (latency > 1000) {
         status = 'Lagging';
-        color = (latency > 1000) ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white';
+        color = 'bg-amber-500 text-white';
       } else if (latency > 300) {
         status = 'Operational';
-        color = (latency > 1000) ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white';
+        color = 'bg-emerald-600 text-white';
       }
       
       setInfraStatus(prev => ({ ...prev, db: status }));
       setInfraColors(prev => ({ ...prev, db: color }));
     } catch {
+      hasFailures = true;
       setInfraStatus(prev => ({ ...prev, db: 'Offline' }));
       setInfraColors(prev => ({ ...prev, db: 'bg-destructive text-destructive-foreground' }));
     }
@@ -59,10 +63,12 @@ export function SystemDiagnostics() {
         setInfraStatus(prev => ({ ...prev, scraper: 'Healthy', azure: 'Live' }));
         setInfraColors(prev => ({ ...prev, scraper: 'bg-emerald-500 text-white', azure: 'bg-emerald-500 text-white' }));
       } else {
+        hasFailures = true;
         setInfraStatus(prev => ({ ...prev, scraper: 'Issues', azure: 'Down' }));
         setInfraColors(prev => ({ ...prev, scraper: 'bg-destructive text-destructive-foreground', azure: 'bg-destructive text-destructive-foreground' }));
       }
     } catch {
+      hasFailures = true;
       setInfraStatus(prev => ({ ...prev, scraper: 'Offline', azure: 'Offline' }));
       setInfraColors(prev => ({ ...prev, scraper: 'bg-destructive text-destructive-foreground', azure: 'bg-destructive text-destructive-foreground' }));
     }
@@ -76,16 +82,22 @@ export function SystemDiagnostics() {
         setInfraStatus(prev => ({ ...prev, broadcaster: 'Idle' }));
         setInfraColors(prev => ({ ...prev, broadcaster: 'bg-slate-400 text-white' }));
       } else {
+        hasFailures = true;
         setInfraStatus(prev => ({ ...prev, broadcaster: 'Issues' }));
         setInfraColors(prev => ({ ...prev, broadcaster: 'bg-destructive text-destructive-foreground' }));
       }
     } catch {
+      hasFailures = true;
       setInfraStatus(prev => ({ ...prev, broadcaster: 'Offline' }));
       setInfraColors(prev => ({ ...prev, broadcaster: 'bg-destructive text-destructive-foreground' }));
     }
 
     setIsCheckingHealth(false);
-    toast.success('Diagnostics completed successfully!', { id: toastId });
+    if (hasFailures) {
+      toast.error('Diagnostics completed with service issues.', { id: toastId });
+    } else {
+      toast.success('Diagnostics completed: all systems healthy!', { id: toastId });
+    }
   };
 
   return (

@@ -29,7 +29,6 @@ export function CalendarEditor() {
 
   // Form states
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newEvent, setNewEvent] = useState({ date: '', title: '', type: 'Holiday', targetTrack: '' });
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -96,7 +95,13 @@ export function CalendarEditor() {
 
   useEffect(() => {
     fetchActiveSemester();
-  }, [selectedTrack]);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTrack || tracks.length === 0) return;
+    const current = tracks.find(s => s.track === selectedTrack);
+    if (current) updateSemesterAndTable(current);
+  }, [selectedTrack, tracks]);
 
   useEffect(() => {
     if (tableName) {

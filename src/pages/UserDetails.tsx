@@ -1,5 +1,5 @@
-import { useDatabaseOptions } from '../hooks/useDatabaseOptions';
 import { useEffect, useState } from 'react';
+import { cleanSemesterCode } from '../lib/academicUtils';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { 
@@ -232,17 +232,22 @@ export function UserDetails() {
         }
       }
 
-      // 4. Fetch Enrollments for both current and next
+      // 4. Fetch Enrollments for both current and next (normalized for spelling differences)
       try {
         const { data: enrollmentsData } = await supabase
           .from('enrollments')
           .select('*')
-          .eq('user_id', userId)
-          .in('semester_code', [semesterCode, nextSemesterCode].filter(Boolean));
+          .eq('user_id', userId);
 
         if (enrollmentsData) {
-          const current = enrollmentsData.filter((e: any) => e.semester_code === semesterCode);
-          const next = enrollmentsData.filter((e: any) => e.semester_code === nextSemesterCode);
+          const normCurrent = cleanSemesterCode(semesterCode);
+          const normNext = cleanSemesterCode(nextSemesterCode);
+          const current = normCurrent
+            ? enrollmentsData.filter((e: any) => cleanSemesterCode(e.semester_code) === normCurrent)
+            : [];
+          const next = normNext
+            ? enrollmentsData.filter((e: any) => cleanSemesterCode(e.semester_code) === normNext)
+            : [];
 
           const processEnrollments = async (list: any[], sem: string) => {
             const sectionIds = list.map((e: any) => e.section_id).filter(Boolean);

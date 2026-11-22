@@ -25,17 +25,34 @@ export function AcademicData() {
 
   async function fetchData(table: Tab) {
     setLoading(true);
-    let query = supabase.from(table).select('*');
-    if (table === 'course_metadata') query = query.order('code');
-    if (table === 'grade_scale') query = query.order('point', { ascending: false });
+    try {
+      let allRows: any[] = [];
+      let from = 0;
+      const pageSize = 1000;
 
-    const { data: result, error } = await query;
-    if (!error && result) {
-      setData(result);
+      while (true) {
+        let query = supabase.from(table).select('*');
+        if (table === 'course_metadata') query = query.order('code');
+        if (table === 'grade_scale') query = query.order('point', { ascending: false });
+        query = query.range(from, from + pageSize - 1);
+
+        const { data: result, error } = await query;
+        if (error) {
+          toast.error(`Failed to load ${table}: ${error.message}`);
+          break;
+        }
+        if (!result || result.length === 0) break;
+        allRows = [...allRows, ...result];
+        if (result.length < pageSize) break;
+        from += pageSize;
+      }
+
+      setData(allRows);
+    } finally {
+      setLoading(false);
+      setIsEditing(null);
+      setIsAdding(false);
     }
-    setLoading(false);
-    setIsEditing(null);
-    setIsAdding(false);
   }
 
   const handleEdit = (item: any) => {
@@ -43,28 +60,37 @@ export function AcademicData() {
     setEditForm({ ...item });
   };
 
-  const handleSave = async (table: Tab) => {
-    let pkField = 'id';
-    if (table === 'course_metadata') {
-      pkField = 'code';
-      // Normalize course code
-      if (editForm.code) {
-        editForm.code = editForm.code.toUpperCase().replace(/\s+/g, '');
+  const applyRowFilter = (query: any, table: Tab, row: any) => {
+    if (table === 'course_metadata') return query.eq('code', row.code);
+    if (table === 'active_semester') return query.eq('track', row.track);
+    if (table === 'grade_scale') {
+      if (row.id !== undefined && row.id !== null) return query.eq('id', row.id);
+      let q = query.eq('grade', row.grade);
+      if (row.policy !== undefined && row.policy !== null) {
+        q = q.eq('policy', row.policy);
       }
+      return q;
     }
-    if (table === 'grade_scale') pkField = 'grade';
-    if (table === 'active_semester') pkField = 'track';
+    return query.eq('id', row.id);
+  };
+
+  const handleSave = async (table: Tab) => {
+    const payload = { ...editForm };
+    if (table === 'course_metadata' && payload.code) {
+      payload.code = String(payload.code).toUpperCase().replace(/\s+/g, '');
+    }
 
     let error;
 
     if (isAdding) {
-      const { error: insertError } = await supabase.from(table).insert([editForm]);
+      const { error: insertError } = await supabase.from(table).insert([payload]);
       error = insertError;
     } else {
-      const { error: updateError } = await supabase
-        .from(table)
-        .update(editForm)
-        .eq(pkField, isEditing[pkField]);
+      const { error: updateError } = await applyRowFilter(
+        supabase.from(table).update(payload),
+        table,
+        isEditing
+      );
       error = updateError;
     }
 
@@ -77,13 +103,8 @@ export function AcademicData() {
 
   const handleDelete = async (item: any, table: Tab) => {
     if (!await confirmAction('Are you sure you want to delete this record?')) return;
-    
-    let pkField = 'id';
-    if (table === 'course_metadata') pkField = 'code';
-    if (table === 'grade_scale') pkField = 'grade';
-    if (table === 'active_semester') pkField = 'track';
 
-    const { error } = await supabase.from(table).delete().eq(pkField, item[pkField]);
+    const { error } = await applyRowFilter(supabase.from(table).delete(), table, item);
 
     if (!error) {
       fetchData(activeTab);

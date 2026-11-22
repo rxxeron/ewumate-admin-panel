@@ -21,17 +21,30 @@ export function Settings() {
 
   async function fetchVersionStats() {
     try {
-      const { data } = await supabase.from('profiles').select('app_version, full_name, student_id');
-      if (data) {
-        const stats: Record<string, { count: number, students: any[] }> = {};
+      const stats: Record<string, { count: number, students: any[] }> = {};
+      let from = 0;
+      const batchSize = 1000;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('app_version, full_name, student_id')
+          .range(from, from + batchSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+
         data.forEach((p: any) => {
           const v = p.app_version || 'Unknown / Older';
           if (!stats[v]) stats[v] = { count: 0, students: [] };
           stats[v].count++;
           stats[v].students.push(p);
         });
-        setVersionStats(stats);
+
+        if (data.length < batchSize) break;
+        from += batchSize;
       }
+
+      setVersionStats(stats);
     } catch (e) {
       console.error('Failed to fetch version stats:', e);
     }
@@ -123,15 +136,9 @@ export function Settings() {
   const handleAdSettingsUpdate = async (updatedValue: any) => {
     setAdConfig((prev: any) => ({ ...prev, value: updatedValue }));
 
-    const { data: checkData } = await supabase.from('app_config').select('key').eq('key', 'ad_settings').maybeSingle();
-    let error;
-    if (checkData) {
-      const { error: updateError } = await supabase.from('app_config').update({ value: updatedValue }).eq('key', 'ad_settings');
-      error = updateError;
-    } else {
-      const { error: insertError } = await supabase.from('app_config').insert([{ key: 'ad_settings', value: updatedValue }]);
-      error = insertError;
-    }
+    const { error } = await supabase
+      .from('app_config')
+      .upsert({ key: 'ad_settings', value: updatedValue }, { onConflict: 'key' });
     if (error) { toast.error('Failed to update ad configurations: ' + error.message); await fetchConfigs(true); }
     else { toast.success(`Monetization settings saved successfully!`); await fetchConfigs(true); }
   };
@@ -140,15 +147,9 @@ export function Settings() {
     setPromoBanner((prev: any) => ({ ...prev, value: updatedValue }));
     setBannerPreviewError(false);
 
-    const { data: checkData } = await supabase.from('app_config').select('key').eq('key', 'promo_banner').maybeSingle();
-    let error;
-    if (checkData) {
-      const { error: updateError } = await supabase.from('app_config').update({ value: updatedValue }).eq('key', 'promo_banner');
-      error = updateError;
-    } else {
-      const { error: insertError } = await supabase.from('app_config').insert([{ key: 'promo_banner', value: updatedValue }]);
-      error = insertError;
-    }
+    const { error } = await supabase
+      .from('app_config')
+      .upsert({ key: 'promo_banner', value: updatedValue }, { onConflict: 'key' });
     if (error) { toast.error('Failed to save banner: ' + error.message); await fetchConfigs(true); }
     else { toast.success('Promo banner saved!'); await fetchConfigs(true); }
   };
@@ -156,15 +157,9 @@ export function Settings() {
   const handleDonationConfigUpdate = async (updatedValue: any) => {
     setDonationConfig((prev: any) => ({ ...prev, value: updatedValue }));
 
-    const { data: checkData } = await supabase.from('app_config').select('key').eq('key', 'donation_popup').maybeSingle();
-    let error;
-    if (checkData) {
-      const { error: updateError } = await supabase.from('app_config').update({ value: updatedValue }).eq('key', 'donation_popup');
-      error = updateError;
-    } else {
-      const { error: insertError } = await supabase.from('app_config').insert([{ key: 'donation_popup', value: updatedValue }]);
-      error = insertError;
-    }
+    const { error } = await supabase
+      .from('app_config')
+      .upsert({ key: 'donation_popup', value: updatedValue }, { onConflict: 'key' });
     if (error) { toast.error('Failed to save donation config: ' + error.message); await fetchConfigs(true); }
     else { toast.success('Donation popup configuration saved!'); await fetchConfigs(true); }
   };

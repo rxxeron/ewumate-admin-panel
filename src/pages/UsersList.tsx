@@ -81,25 +81,46 @@ export function UsersList() {
   const handleExportCSV = async () => {
     toast.loading('Preparing CSV export...', { id: 'csv-export' });
     try {
-      let query = supabase.from('profiles').select('*');
-      if (debouncedSearch.trim()) {
-        const sanitized = debouncedSearch.replace(/[,()]/g, '').trim();
-        query = query.or(`full_name.ilike.%${sanitized}%,student_id.ilike.%${sanitized}%`);
+      const allData: Profile[] = [];
+      let from = 0;
+      const batchSize = 1000;
+
+      while (true) {
+        let query = supabase
+          .from('profiles')
+          .select('student_id, full_name, program_code, department_name, cgpa, total_credits_earned, onboarding_status, created_at')
+          .order('created_at', { ascending: false })
+          .range(from, from + batchSize - 1);
+
+        if (debouncedSearch.trim()) {
+          const sanitized = debouncedSearch.replace(/[,()]/g, '').trim();
+          query = query.or(`full_name.ilike.%${sanitized}%,student_id.ilike.%${sanitized}%`);
+        }
+        if (filterDept) query = query.eq('department_name', filterDept);
+        if (filterProg) query = query.eq('program_code', filterProg);
+        if (filterStatus) query = query.eq('onboarding_status', filterStatus);
+
+        const { data, error } = await query;
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData.push(...(data as Profile[]));
+        if (data.length < batchSize) break;
+        from += batchSize;
       }
-      if (filterDept) query = query.eq('department_name', filterDept);
-      if (filterProg) query = query.eq('program_code', filterProg);
-      if (filterStatus) query = query.eq('onboarding_status', filterStatus);
 
-      const { data, error } = await query;
-      if (error) throw error;
-
-      if (!data || data.length === 0) {
+      if (allData.length === 0) {
         toast.error('No data to export', { id: 'csv-export' });
         return;
       }
 
+      const escapeCsvCell = (value: unknown) => {
+        const raw = String(value ?? '');
+        const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+        return `"${safe.replace(/"/g, '""')}"`;
+      };
+
       const headers = ['Student ID', 'Name', 'Program', 'Department', 'CGPA', 'Credits', 'Status', 'Joined'];
-      const csvData = data.map((u) => [
+      const csvData = allData.map((u) => [
         u.student_id || 'N/A',
         u.full_name || 'N/A',
         u.program_code || 'N/A',
@@ -112,16 +133,18 @@ export function UsersList() {
 
       const csvContent = [
         headers.join(','),
-        ...csvData.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
+        ...csvData.map((row) => row.map(escapeCsvCell).join(',')),
       ].join('\n');
 
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const blobUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
+      link.href = blobUrl;
       link.download = `ewumate_students_${new Date().toISOString().split('T')[0]}.csv`;
       link.click();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 
-      toast.success(`Exported ${data.length} student records`, { id: 'csv-export' });
+      toast.success(`Exported ${allData.length} student records`, { id: 'csv-export' });
     } catch (error: any) {
       toast.error('Export failed: ' + error.message, { id: 'csv-export' });
     }

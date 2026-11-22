@@ -124,17 +124,35 @@ export function useDatabaseOptions() {
         // 2. Semesters
         if (!cachedSemesters) {
           promises.push((async () => {
-            const { data } = await supabase
+            const { data, error } = await supabase
               .from('semesters')
-              .select('code, name, is_active')
+              .select('code, title, is_active')
               .order('created_at', { ascending: false });
 
-            if (data && isMounted) {
-              const sems: SemesterOption[] = data.map(s => ({
-                code: s.code,
-                name: s.name || s.code,
-                isActive: !!s.is_active
-              }));
+            if (error) {
+              console.error('Failed to load semesters:', error);
+            } else if (data && isMounted) {
+              let activeCode: string | null = null;
+              const hasExplicitActive = data.some((s: any) => s.is_active);
+              if (!hasExplicitActive) {
+                const { data: activeData } = await supabase
+                  .from('active_semester')
+                  .select('current_semester_code')
+                  .eq('track', 'tri_semester')
+                  .maybeSingle();
+                if (activeData?.current_semester_code) {
+                  activeCode = activeData.current_semester_code.toLowerCase().replace(/[^a-z0-9]/g, '');
+                }
+              }
+
+              const sems: SemesterOption[] = data.map((s: any) => {
+                const normCode = (s.code || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                return {
+                  code: s.code,
+                  name: s.title || s.code,
+                  isActive: !!s.is_active || (!!activeCode && normCode === activeCode)
+                };
+              });
               cachedSemesters = sems;
               setSemesters(sems);
             }
@@ -144,17 +162,19 @@ export function useDatabaseOptions() {
         // 3. Faculty Directory
         if (!cachedFaculty) {
           promises.push((async () => {
-            const { data } = await supabase
+            const { data, error } = await supabase
               .from('faculty_master')
-              .select('initials, full_name, department_name, designation')
-              .order('initials', { ascending: true });
+              .select('short_name, full_name, department_name, designation_name')
+              .order('short_name', { ascending: true });
 
-            if (data && isMounted) {
-              const facs: FacultyOption[] = data.map(f => ({
-                initials: f.initials,
-                name: f.full_name || f.initials,
+            if (error) {
+              console.error('Failed to load faculty:', error);
+            } else if (data && isMounted) {
+              const facs: FacultyOption[] = data.map((f: any) => ({
+                initials: f.short_name,
+                name: f.full_name || f.short_name,
                 department: f.department_name || '',
-                designation: f.designation
+                designation: f.designation_name
               }));
               cachedFaculty = facs;
               setFaculty(facs);
