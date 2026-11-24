@@ -16,6 +16,7 @@ import {
 import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { useTheme } from '../components/ThemeContext';
+import { PostHogTelemetryPanel } from '../components/analytics/PostHogTelemetryPanel';
 
 type TimeRange = '1W' | '14D' | '1M' | '3M' | '6M' | '1Y';
 
@@ -446,6 +447,8 @@ export function Analytics() {
           </div>
         </div>
       </div>
+
+      <PostHogTelemetryPanel />
     </div>
   );
 }
