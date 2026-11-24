@@ -75,7 +75,12 @@ export function AcademicData() {
   };
 
   const handleSave = async (table: Tab) => {
-    const payload = { ...editForm };
+    const payload: Record<string, any> = { ...editForm };
+    for (const col of columns[table]) {
+      if ((col.type === 'date' || col.type === 'number') && payload[col.key] === '') {
+        payload[col.key] = null;
+      }
+    }
     if (table === 'course_metadata' && payload.code) {
       payload.code = String(payload.code).toUpperCase().replace(/\s+/g, '');
     }

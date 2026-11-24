@@ -193,12 +193,10 @@ export function Settings() {
       const newVersion = Date.now();
       const val = { version: newVersion, updated_at: new Date().toISOString() };
 
-      const { data: checkData } = await supabase.from('app_config').select('key').eq('key', 'catalog_cache_version').maybeSingle();
-      if (checkData) {
-        await supabase.from('app_config').update({ value: val }).eq('key', 'catalog_cache_version');
-      } else {
-        await supabase.from('app_config').insert([{ key: 'catalog_cache_version', value: val }]);
-      }
+      const { error } = await supabase
+        .from('app_config')
+        .upsert({ key: 'catalog_cache_version', value: val }, { onConflict: 'key' });
+      if (error) throw error;
       toast.success('Global user cache flushed! Mobile apps will re-sync.', { id: toastId });
     } catch (e: any) {
       toast.error('Failed to flush cache: ' + e.message, { id: toastId });

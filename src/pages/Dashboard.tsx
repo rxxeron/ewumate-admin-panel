@@ -140,10 +140,11 @@ export function Dashboard() {
 
 
       try {
+        const safeTerm = searchTerm.replace(/[,()]/g, '');
         const { data } = await supabase
           .from('profiles')
           .select('id, full_name, student_id, program_code')
-          .or(`full_name.ilike.%${searchTerm}%,student_id.ilike.%${searchTerm}%`)
+          .or(`full_name.ilike.%${safeTerm}%,student_id.ilike.%${safeTerm}%`)
           .limit(5);
         
         setSearchResults((data as Profile[]) || []);

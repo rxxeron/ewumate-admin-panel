@@ -111,9 +111,9 @@ export function CalendarEditor() {
     }
   }, [tableName]);
 
-    const { register, handleSubmit, formState: { errors }, reset, setValue } = useForm<EventFormValues>({
+  const { register, handleSubmit, formState: { errors }, reset } = useForm<EventFormValues>({
     resolver: zodResolver(eventSchema),
-    defaultValues: { type: 'Holiday', targetTrack: '' }
+    defaultValues: { type: 'Holiday', targetTrack: 'tri_semester' }
   });
 
   const onSubmit = async (data: EventFormValues) => {
@@ -134,10 +134,12 @@ export function CalendarEditor() {
       const biTable = `calendar_${cleanSem}_phrm_llb`;
 
       if (targetTrack === 'both') {
-        await Promise.all([
+        const [triRes, biRes] = await Promise.all([
           supabase.from(triTable).insert([{ ...payload, target_track: 'tri_semester' }]),
           supabase.from(biTable).insert([{ ...payload, target_track: 'bi_semester' }])
         ]);
+        if (triRes.error) throw triRes.error;
+        if (biRes.error) throw biRes.error;
         
         fetchEvents(tableName);
       } else {

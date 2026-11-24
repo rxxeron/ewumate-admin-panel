@@ -123,7 +123,8 @@ export function ActiveSemester() {
       toast.error(`Failed to update ${track}: ` + error.message);
     } else {
       toast.success(`${track} milestone dates & config synchronized!`);
-      fetchSemesters();
+      // Update only the saved track in state so unsaved edits in the other track are preserved.
+      setTracks(prev => prev.map(t => (t.track === track ? { ...t, ...payload } : t)));
     }
     setSaving(null);
   };

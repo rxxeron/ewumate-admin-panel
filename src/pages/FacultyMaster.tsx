@@ -48,7 +48,8 @@ export function FacultyMaster() {
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (searchTerm) {
-      query = query.or(`full_name.ilike.%${searchTerm}%,short_name.ilike.%${searchTerm}%,office_room.ilike.%${searchTerm}%`);
+      const safeTerm = searchTerm.replace(/[,()]/g, '');
+      query = query.or(`full_name.ilike.%${safeTerm}%,short_name.ilike.%${safeTerm}%,office_room.ilike.%${safeTerm}%`);
     }
 
     const { data, error, count } = await query;
