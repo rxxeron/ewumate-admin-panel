@@ -34,6 +34,7 @@ export function Dashboard() {
     ignoredFeedbacks: 0,
   });
   const [recentUsers, setRecentUsers] = useState<Profile[]>([]);
+  const [activeUsers, setActiveUsers] = useState<Array<Profile & { phSessions?: number; phLastSeen?: string | null }>>([]);
   const [topScreens, setTopScreens] = useState<Array<{ screen: string; views: number; users: number }>>([]);
   const [semesterStats, setSemesterStats] = useState<Record<string, SemesterTrackStats>>({});
   const [registrationTrend, setRegistrationTrend] = useState<any[]>([]);
@@ -89,6 +90,24 @@ export function Dashboard() {
         });
 
         setRecentUsers((data.recentUsers as Profile[]) || []);
+        const phUsersMap = new Map<string, { sessions: number; lastSeen: string }>();
+        if (ph?.configured && Array.isArray(ph.activeUsers)) {
+          for (const u of ph.activeUsers) {
+            phUsersMap.set(String(u.distinctId), {
+              sessions: Number(u.sessions ?? 0),
+              lastSeen: String(u.lastSeen ?? ''),
+            });
+          }
+        }
+        const mergedActive = ((data.activeUsers as Profile[]) || []).map((u) => {
+          const phU = phUsersMap.get(u.id);
+          return {
+            ...u,
+            phSessions: phU?.sessions ?? 0,
+            phLastSeen: phU?.lastSeen || u.last_active_at,
+          };
+        });
+        setActiveUsers(mergedActive);
         setSemesterStats(data.semesterStats || {});
         setRegistrationTrend(data.registrationTrend || []);
         if (ph?.configured) {
@@ -643,7 +662,59 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* Top Screens (PostHog 7D) */}
+        {/* Recent Activity (Historical + Live PostHog Sessions) */}
+        <div className="bg-card rounded-lg shadow-sm border border-border overflow-hidden">
+          <div className="px-8 py-6 border-b border-border flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-foreground flex items-center gap-3 tracking-tight">
+              <div className="w-2 h-2 rounded-full bg-primary" />
+              Recent Activity
+            </h3>
+            <button className="text-xs font-semibold text-primary dark:text-primary hover:underline" onClick={() => navigate('/users')}>View All</button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-8 py-4 text-left text-xs text-muted-foreground dark:text-slate-500">User</th>
+                  <th className="px-8 py-4 text-center text-xs text-muted-foreground dark:text-slate-500">Total Opens</th>
+                  <th className="px-8 py-4 text-left text-xs text-muted-foreground dark:text-slate-500">Last Active</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 dark:divide-white/5">
+                {activeUsers.map((user) => {
+                  const totalOpens = (user.app_open_count || 0) + (user.phSessions || 0);
+                  const lastTs = user.phLastSeen || user.last_active_at;
+                  return (
+                    <tr key={user.id} className="hover:bg-accent hover:text-accent-foreground cursor-pointer transition-colors group" onClick={() => navigate(`/users/${user.id}`)}>
+                      <td className="px-8 py-5">
+                        <div className="text-sm font-semibold text-foreground truncate max-w-[150px]">{user.full_name || 'Unknown'}</div>
+                        <div className="text-xs text-primary font-bold">{user.student_id || '-'}</div>
+                      </td>
+                      <td className="px-8 py-5 text-center">
+                        <span className="px-3 py-1 bg-muted rounded-lg text-xs font-semibold text-foreground border border-border">
+                          {totalOpens}
+                          {user.phSessions ? <span className="ml-1 text-[10px] text-emerald-500">+{user.phSessions}</span> : null}
+                        </span>
+                      </td>
+                      <td className="px-8 py-5">
+                        <div className="text-xs font-bold text-foreground">
+                          {lastTs ? new Date(lastTs).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'Never'}
+                        </div>
+                        <div className="text-xs text-muted-foreground font-bold">
+                          {lastTs ? new Date(lastTs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '-'}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Top Screens (PostHog 7D) */}
+      {topScreens.length > 0 && (
         <div className="bg-card rounded-lg shadow-sm border border-border overflow-hidden">
           <div className="px-8 py-6 border-b border-border flex items-center justify-between">
             <h3 className="text-lg font-semibold text-foreground flex items-center gap-3 tracking-tight">
@@ -662,30 +733,22 @@ export function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50 dark:divide-white/5">
-                {topScreens.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="px-8 py-8 text-center text-xs text-muted-foreground">
-                      No screen views recorded yet.
+                {topScreens.map((s) => (
+                  <tr key={s.screen} className="hover:bg-accent hover:text-accent-foreground cursor-pointer transition-colors" onClick={() => navigate('/analytics')}>
+                    <td className="px-8 py-4 text-sm font-semibold text-foreground">{s.screen}</td>
+                    <td className="px-8 py-4 text-center">
+                      <span className="px-3 py-1 bg-muted rounded-lg text-xs font-semibold text-foreground border border-border">
+                        {s.views}
+                      </span>
                     </td>
+                    <td className="px-8 py-4 text-right text-xs font-bold text-foreground">{s.users}</td>
                   </tr>
-                ) : (
-                  topScreens.map((s) => (
-                    <tr key={s.screen} className="hover:bg-accent hover:text-accent-foreground cursor-pointer transition-colors" onClick={() => navigate('/analytics')}>
-                      <td className="px-8 py-4 text-sm font-semibold text-foreground">{s.screen}</td>
-                      <td className="px-8 py-4 text-center">
-                        <span className="px-3 py-1 bg-muted rounded-lg text-xs font-semibold text-foreground border border-border">
-                          {s.views}
-                        </span>
-                      </td>
-                      <td className="px-8 py-4 text-right text-xs font-bold text-foreground">{s.users}</td>
-                    </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
