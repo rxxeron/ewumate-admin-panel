@@ -50,6 +50,11 @@ interface PostHogPayload {
     hits: number;
     lastSeen: string;
   }>;
+  onboardingFunnel?: Array<{ step: string; users: number }>;
+  retentionCohorts?: {
+    totalCohort: number;
+    buckets: Array<{ label: string; retained: number; eligible: number }>;
+  };
 }
 
 function formatDuration(seconds: number): string {
@@ -320,6 +325,66 @@ export function PostHogTelemetryPanel() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Live PostHog Screen Onboarding Funnel + Retention Cohorts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {data.onboardingFunnel && (
+              <div className="p-4 rounded-xl bg-muted/20 border border-border space-y-3">
+                <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-primary" />
+                  Live Screen-by-Screen Onboarding Funnel ({days}D)
+                </h4>
+                <div className="space-y-2.5">
+                  {(() => {
+                    const maxFunnel = Math.max(...data.onboardingFunnel.map((x) => x.users), 1);
+                    return data.onboardingFunnel.map((item, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="font-medium text-foreground">{idx + 1}. {item.step}</span>
+                          <span className="text-muted-foreground">{item.users} users</span>
+                        </div>
+                        <div className="h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-indigo-500 rounded-full"
+                            style={{ width: `${Math.round((item.users / maxFunnel) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {data.retentionCohorts && (
+              <div className="p-4 rounded-xl bg-muted/20 border border-border space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-primary" />
+                    User Retention Cohorts (D1 – D30)
+                  </h4>
+                  <span className="text-[11px] text-muted-foreground">
+                    Cohort size: {data.retentionCohorts.totalCohort} users
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-2 pt-1">
+                  {data.retentionCohorts.buckets.map((b, idx) => {
+                    const pct = b.eligible > 0 ? Math.round((b.retained / b.eligible) * 100) : 0;
+                    return (
+                      <div key={idx} className="p-3 rounded-lg bg-background border border-border text-center space-y-1">
+                        <p className="text-[11px] font-medium text-muted-foreground">{b.label}</p>
+                        <p className="text-lg font-bold text-foreground">{pct}%</p>
+                        <p className="text-[10px] text-muted-foreground">{b.retained}/{b.eligible}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Retention populates automatically as today&apos;s users return on Day 1, 3, 7, 14, and 30.
+                </p>
               </div>
             )}
           </div>
