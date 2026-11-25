@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import type { Profile, Enrollment, CompletedCourse, Task, CourseMark, UserSemesterState, LocalNotificationState } from '../types';
 import { CardSkeleton, Skeleton } from '../components/Skeleton';
 import { cn } from '../lib/utils';
+import { UserPostHogCard } from '../components/analytics/UserPostHogCard';
 
 export function UserDetails() {
   const { id } = useParams<{ id: string }>();
@@ -592,6 +593,8 @@ export function UserDetails() {
                   </div>
                 </motion.div>
               </div>
+
+              <UserPostHogCard userId={user.id} />
 
               {/* Quick Actions */}
               <div className="bg-slate-900 rounded-[2rem] p-8 shadow-xl text-white overflow-hidden relative group">
