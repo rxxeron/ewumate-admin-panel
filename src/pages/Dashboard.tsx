@@ -70,7 +70,7 @@ export function Dashboard() {
       if (data) {
         setStats({
           users: data.stats.users || 0,
-          activeUsers24h: ph?.configured ? (ph.summary?.dau ?? 0) : (data.stats.activeUsers24h || 0),
+          activeUsers24h: Math.max(data.stats.activeUsers24h || 0, ph?.configured ? (ph.summary?.dau ?? 0) : 0),
           programs: data.stats.programs || 0,
           courses: data.stats.courses || 0,
           notifications: data.stats.notifications || 0,
@@ -92,10 +92,18 @@ export function Dashboard() {
         setSemesterStats(data.semesterStats || {});
         setRegistrationTrend(data.registrationTrend || []);
         if (ph?.configured) {
-          setActivityTrend(ph.dailyTrend || []);
+          const histMap = new Map<string, number>();
+          for (const row of (data.activityTrend || []) as any[]) {
+            histMap.set(String(row.date), Number(row.active ?? row.users ?? 0));
+          }
+          const mergedTrend = (ph.dailyTrend || []).slice(-7).map((d: any) => ({
+            ...d,
+            users: Math.max(Number(d.users ?? 0), histMap.get(String(d.date)) ?? 0),
+          }));
+          setActivityTrend(mergedTrend);
           setTopScreens((ph.topScreens || []).slice(0, 6));
         } else {
-          setActivityTrend(data.activityTrend || []);
+          setActivityTrend((data.activityTrend || []).map((d: any) => ({ ...d, users: d.active ?? d.users ?? 0 })));
         }
       }
     } catch (err) {

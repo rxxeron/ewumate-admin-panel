@@ -68,17 +68,59 @@ export function PostHogTelemetryPanel() {
   const [days, setDays] = useState<number>(14);
   const [loading, setLoading] = useState<boolean>(true);
   const [data, setData] = useState<PostHogPayload | null>(null);
+  const [histStats, setHistStats] = useState<{
+    totalUsers: number;
+    rollingMau: number;
+    rollingYau: number;
+    peakActivity: number;
+    funnel: { registered: number; courseHistory: number; completed: number; total: number };
+  } | null>(null);
   const [proxyError, setProxyError] = useState<string | null>(null);
 
   const fetchTelemetry = async () => {
     setLoading(true);
     setProxyError(null);
     try {
-      const { data: res, error } = await supabase.functions.invoke('posthog-proxy', {
-        body: { days },
-      });
-      if (error) throw error;
-      setData(res as PostHogPayload);
+      const [phRes, histRes] = await Promise.all([
+        supabase.functions.invoke('posthog-proxy', { body: { days } }),
+        supabase.rpc('get_admin_analytics_stats', { timeframe_days: days }).then((r) => r, () => ({ data: null, error: null })),
+      ]);
+      if (phRes.error) throw phRes.error;
+
+      const ph = phRes.data as PostHogPayload;
+      const hist = histRes?.data as any;
+
+      if (hist) {
+        setHistStats({
+          totalUsers: Number(hist.stats?.totalUsers ?? 0),
+          rollingMau: Number(hist.stats?.rollingMau ?? 0),
+          rollingYau: Number(hist.stats?.rollingYau ?? 0),
+          peakActivity: Number(hist.stats?.peakActivity ?? 0),
+          funnel: {
+            registered: Number(hist.funnelData?.registered ?? 0),
+            courseHistory: Number(hist.funnelData?.courseHistory ?? 0),
+            completed: Number(hist.funnelData?.completed ?? 0),
+            total: Number(hist.funnelData?.total ?? 0),
+          },
+        });
+      }
+
+      if (ph?.configured && ph.dailyTrend && hist?.activityData) {
+        const histByDate = new Map<string, number>();
+        for (const row of hist.activityData as any[]) {
+          histByDate.set(String(row.date), Number(row.dau ?? 0));
+        }
+        ph.dailyTrend = ph.dailyTrend.map((d) => ({
+          ...d,
+          users: Math.max(d.users, histByDate.get(d.date) ?? 0),
+        }));
+        if (ph.summary) {
+          ph.summary.dau = Math.max(ph.summary.dau, Number(hist.stats?.activeUsers ?? 0));
+          ph.summary.mau = Math.max(ph.summary.mau, Number(hist.stats?.rollingMau ?? 0));
+        }
+      }
+
+      setData(ph);
     } catch (err: any) {
       setProxyError(err?.message ?? 'PostHog proxy unavailable');
     } finally {
@@ -376,6 +418,53 @@ export function PostHogTelemetryPanel() {
               </div>
             </div>
           </div>
+
+          {/* Historical Ecosystem & Onboarding Funnel (Supabase Auth/Profiles) */}
+          {histStats && (
+            <div className="p-4 rounded-xl bg-muted/20 border border-border space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+                  <Users className="w-4 h-4 text-primary" />
+                  All-Time Ecosystem & Onboarding Funnel (Supabase Profiles)
+                </h4>
+                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                  <span>Total Profiles: <strong className="text-foreground">{histStats.totalUsers.toLocaleString()}</strong></span>
+                  <span>• Historical MAU: <strong className="text-foreground">{histStats.rollingMau.toLocaleString()}</strong></span>
+                  <span>• YAU: <strong className="text-foreground">{histStats.rollingYau.toLocaleString()}</strong></span>
+                  <span>• Peak DAU: <strong className="text-foreground">{histStats.peakActivity.toLocaleString()}</strong></span>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  {
+                    label: 'Stage 1: Registered Accounts',
+                    count: histStats.funnel.total,
+                    pct: 100,
+                  },
+                  {
+                    label: 'Stage 2: Course History Added',
+                    count: histStats.funnel.courseHistory + histStats.funnel.completed,
+                    pct: histStats.funnel.total > 0 ? Math.round(((histStats.funnel.courseHistory + histStats.funnel.completed) / histStats.funnel.total) * 100) : 0,
+                  },
+                  {
+                    label: 'Stage 3: Onboarding Completed',
+                    count: histStats.funnel.completed,
+                    pct: histStats.funnel.total > 0 ? Math.round((histStats.funnel.completed / histStats.funnel.total) * 100) : 0,
+                  },
+                ].map((stage, i) => (
+                  <div key={i} className="p-3 rounded-lg bg-background border border-border space-y-2">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-medium text-foreground">{stage.label}</span>
+                      <span className="font-semibold text-primary">{stage.count.toLocaleString()} ({stage.pct}%)</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-primary rounded-full" style={{ width: `${stage.pct}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Active Users Table */}
           <div className="p-4 rounded-xl bg-muted/20 border border-border space-y-3">
