@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
   ExternalLink, Bug, Activity, MonitorSmartphone, Link2, Check,
-  RefreshCcw, Layers, Smartphone, Zap, AlertTriangle
+  RefreshCcw, Layers, Smartphone, Zap, AlertTriangle, Clock,
+  GraduationCap, Users
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip
@@ -23,11 +24,23 @@ interface PostHogPayload {
     totalOpens: number;
     totalScreens: number;
     totalErrors: number;
+    avgSessionSec: number;
   };
   dailyTrend?: Array<{ date: string; users: number; opens: number; screens: number; errors: number }>;
+  hourlyTrend?: Array<{ hour: string; events: number; users: number }>;
   topScreens?: Array<{ screen: string; views: number; users: number }>;
   appVersions?: Array<{ version: string; platform: string; users: number; events: number }>;
+  programBreakdown?: Array<{ program: string; batch: string; users: number; events: number }>;
   featureEvents?: Array<{ event: string; total: number; users: number }>;
+  activeUsers?: Array<{
+    distinctId: string;
+    email: string | null;
+    platform: string;
+    appVersion: string;
+    sessions: number;
+    screens: number;
+    lastSeen: string;
+  }>;
   recentErrors?: Array<{
     type: string;
     message: string;
@@ -37,6 +50,13 @@ interface PostHogPayload {
     hits: number;
     lastSeen: string;
   }>;
+}
+
+function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return '0s';
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
 export function PostHogTelemetryPanel() {
@@ -101,7 +121,7 @@ export function PostHogTelemetryPanel() {
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            Live screen views, daily opens per user, app versions, feature usage, and unhandled errors from Project #{POSTHOG_PROJECT_ID}
+            Live screen views, session depth & duration, peak hours (BDT), programs, app versions, active users, and errors from Project #{POSTHOG_PROJECT_ID}
           </p>
         </div>
 
@@ -179,7 +199,6 @@ export function PostHogTelemetryPanel() {
         </div>
       )}
 
-      {/* Native PostHog API Data */}
       {loading && !data ? (
         <div className="py-12 flex items-center justify-center text-xs text-muted-foreground gap-2">
           <RefreshCcw className="w-4 h-4 animate-spin text-primary" />
@@ -188,15 +207,20 @@ export function PostHogTelemetryPanel() {
       ) : data?.configured && data.summary ? (
         <div className="space-y-6">
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[
               { label: 'PostHog DAU', value: data.summary.dau, sub: `WAU: ${data.summary.wau} • MAU: ${data.summary.mau}` },
-              { label: `App Opens (${days}D)`, value: data.summary.totalOpens, sub: 'Cold starts & sessions' },
+              { label: `Sessions (${days}D)`, value: data.summary.totalOpens, sub: 'Distinct app sessions' },
               { label: `Screen Views (${days}D)`, value: data.summary.totalScreens, sub: 'GoRouter transitions' },
               {
-                label: 'Screens / Open',
+                label: 'Screens / Session',
                 value: data.summary.totalOpens > 0 ? (data.summary.totalScreens / data.summary.totalOpens).toFixed(1) : '0.0',
-                sub: 'Avg depth per session',
+                sub: 'Avg depth per visit',
+              },
+              {
+                label: 'Avg Session Time',
+                value: formatDuration(data.summary.avgSessionSec),
+                sub: 'Active engagement',
               },
               { label: `Errors (${days}D)`, value: data.summary.totalErrors, sub: 'Unhandled + caught', danger: data.summary.totalErrors > 0 },
             ].map((card, i) => (
@@ -208,31 +232,54 @@ export function PostHogTelemetryPanel() {
             ))}
           </div>
 
-          {/* Daily Opens & Screen Views Chart */}
-          {data.dailyTrend && data.dailyTrend.length > 0 && (
-            <div className="p-4 rounded-xl bg-muted/20 border border-border">
-              <h4 className="text-xs font-semibold text-foreground mb-3 flex items-center gap-2">
-                <MonitorSmartphone className="w-4 h-4 text-primary" />
-                Daily Active Users, App Opens & Screen Views
-              </h4>
-              <div className="h-[240px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data.dailyTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    <Bar dataKey="users" name="Unique Users" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="opens" name="App Opens" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="screens" name="Screen Views" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+          {/* Daily Trend + Peak Hours */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {data.dailyTrend && (
+              <div className="p-4 rounded-xl bg-muted/20 border border-border">
+                <h4 className="text-xs font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <MonitorSmartphone className="w-4 h-4 text-primary" />
+                  Daily Active Users, Sessions & Screen Views ({days}D)
+                </h4>
+                <div className="h-[240px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data.dailyTrend}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" vertical={false} />
+                      <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                      <Tooltip />
+                      <Bar dataKey="users" name="Users" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="opens" name="Sessions" fill="#06b6d4" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="screens" name="Screens" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Top Screens + App Versions + Feature Funnel */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {data.hourlyTrend && (
+              <div className="p-4 rounded-xl bg-muted/20 border border-border">
+                <h4 className="text-xs font-semibold text-foreground mb-3 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-primary" />
+                  Peak Usage Hours (Bangladesh Time • Asia/Dhaka)
+                </h4>
+                <div className="h-[240px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data.hourlyTrend}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" vertical={false} />
+                      <XAxis dataKey="hour" tick={{ fontSize: 9 }} interval={2} />
+                      <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                      <Tooltip />
+                      <Bar dataKey="events" name="Events" fill="#10b981" radius={[3, 3, 0, 0]} />
+                      <Bar dataKey="users" name="Unique Users" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Top Screens + App Versions + Programs + Feature Funnel */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {/* Top Screens */}
             <div className="p-4 rounded-xl bg-muted/20 border border-border space-y-3">
               <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
@@ -245,9 +292,9 @@ export function PostHogTelemetryPanel() {
                 ) : (
                   data.topScreens!.map((s, idx) => (
                     <div key={idx} className="space-y-1">
-                      <div className="flex justify-between text-xs">
+                      <div className="flex justify-between text-xs gap-2">
                         <span className="font-medium text-foreground truncate">{s.screen}</span>
-                        <span className="text-muted-foreground">{s.views} views • {s.users} users</span>
+                        <span className="text-muted-foreground shrink-0">{s.views} • {s.users}u</span>
                       </div>
                       <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                         <div
@@ -273,11 +320,36 @@ export function PostHogTelemetryPanel() {
                 ) : (
                   data.appVersions!.map((v, idx) => (
                     <div key={idx} className="flex items-center justify-between py-1.5 border-b border-border/60 last:border-0 text-xs">
-                      <div>
+                      <div className="truncate">
                         <span className="font-semibold text-foreground">v{v.version}</span>
-                        <span className="ml-2 px-1.5 py-0.5 rounded bg-muted text-[10px] uppercase text-muted-foreground">{v.platform}</span>
+                        <span className="ml-1.5 px-1.5 py-0.5 rounded bg-muted text-[10px] uppercase text-muted-foreground">{v.platform}</span>
                       </div>
-                      <span className="text-muted-foreground">{v.users} users • {v.events} events</span>
+                      <span className="text-muted-foreground shrink-0">{v.users}u • {v.events}e</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Department & Batch */}
+            <div className="p-4 rounded-xl bg-muted/20 border border-border space-y-3">
+              <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+                <GraduationCap className="w-4 h-4 text-primary" />
+                Departments & Batches
+              </h4>
+              <div className="space-y-2">
+                {(data.programBreakdown ?? []).length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Waiting for identified profiles.</p>
+                ) : (
+                  data.programBreakdown!.map((p, idx) => (
+                    <div key={idx} className="flex items-center justify-between py-1.5 border-b border-border/60 last:border-0 text-xs">
+                      <div className="truncate">
+                        <span className="font-semibold text-foreground">{p.program}</span>
+                        {p.batch !== '-' && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground">{p.batch}</span>
+                        )}
+                      </div>
+                      <span className="text-muted-foreground shrink-0">{p.users}u • {p.events}e</span>
                     </div>
                   ))
                 )}
@@ -295,14 +367,56 @@ export function PostHogTelemetryPanel() {
                   <p className="text-xs text-muted-foreground">No feature events yet.</p>
                 ) : (
                   data.featureEvents!.map((f, idx) => (
-                    <div key={idx} className="flex items-center justify-between py-1.5 border-b border-border/60 last:border-0 text-xs">
-                      <span className="font-mono text-[11px] text-foreground">{f.event}</span>
-                      <span className="text-muted-foreground">{f.total} ({f.users} users)</span>
+                    <div key={idx} className="flex items-center justify-between py-1.5 border-b border-border/60 last:border-0 text-xs gap-2">
+                      <span className="font-mono text-[11px] text-foreground truncate">{f.event}</span>
+                      <span className="text-muted-foreground shrink-0">{f.total} ({f.users}u)</span>
                     </div>
                   ))
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Active Users Table */}
+          <div className="p-4 rounded-xl bg-muted/20 border border-border space-y-3">
+            <h4 className="text-xs font-semibold text-foreground flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" />
+              Recently Active Users ({days}D)
+            </h4>
+            {(data.activeUsers ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground">No active users recorded yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-muted-foreground border-b border-border">
+                      <th className="pb-2 font-medium">User / Distinct ID</th>
+                      <th className="pb-2 font-medium">Platform</th>
+                      <th className="pb-2 font-medium">Version</th>
+                      <th className="pb-2 font-medium text-center">Sessions</th>
+                      <th className="pb-2 font-medium text-center">Screens</th>
+                      <th className="pb-2 font-medium text-right">Last Seen</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {data.activeUsers!.map((u, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2 font-medium text-foreground truncate max-w-[220px]">
+                          {u.email || u.distinctId}
+                        </td>
+                        <td className="py-2 uppercase text-[10px] text-muted-foreground">{u.platform}</td>
+                        <td className="py-2 text-muted-foreground">v{u.appVersion}</td>
+                        <td className="py-2 text-center font-semibold text-foreground">{u.sessions}</td>
+                        <td className="py-2 text-center text-muted-foreground">{u.screens}</td>
+                        <td className="py-2 text-right text-muted-foreground">
+                          {u.lastSeen ? new Date(u.lastSeen).toLocaleString() : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Live Errors */}
