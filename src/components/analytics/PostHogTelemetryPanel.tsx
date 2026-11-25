@@ -73,6 +73,8 @@ export function PostHogTelemetryPanel() {
     rollingMau: number;
     rollingYau: number;
     peakActivity: number;
+    growthRate: number;
+    growthData: Array<{ date: string; count: number; total: number }>;
     funnel: { registered: number; courseHistory: number; completed: number; total: number };
   } | null>(null);
   const [proxyError, setProxyError] = useState<string | null>(null);
@@ -96,6 +98,8 @@ export function PostHogTelemetryPanel() {
           rollingMau: Number(hist.stats?.rollingMau ?? 0),
           rollingYau: Number(hist.stats?.rollingYau ?? 0),
           peakActivity: Number(hist.stats?.peakActivity ?? 0),
+          growthRate: parseFloat(hist.stats?.growthRate || '0'),
+          growthData: Array.isArray(hist.growthData) ? hist.growthData : [],
           funnel: {
             registered: Number(hist.funnelData?.registered ?? 0),
             courseHistory: Number(hist.funnelData?.courseHistory ?? 0),
@@ -429,9 +433,11 @@ export function PostHogTelemetryPanel() {
                 </h4>
                 <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                   <span>Total Profiles: <strong className="text-foreground">{histStats.totalUsers.toLocaleString()}</strong></span>
+                  <span>• Growth: <strong className="text-emerald-500">+{histStats.growthRate}%</strong></span>
                   <span>• Historical MAU: <strong className="text-foreground">{histStats.rollingMau.toLocaleString()}</strong></span>
                   <span>• YAU: <strong className="text-foreground">{histStats.rollingYau.toLocaleString()}</strong></span>
                   <span>• Peak DAU: <strong className="text-foreground">{histStats.peakActivity.toLocaleString()}</strong></span>
+                  <span>• Drop-off: <strong className="text-rose-500">{histStats.funnel.total > 0 ? (((histStats.funnel.total - histStats.funnel.completed) / histStats.funnel.total) * 100).toFixed(1) : '0.0'}%</strong></span>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -463,6 +469,22 @@ export function PostHogTelemetryPanel() {
                   </div>
                 ))}
               </div>
+              {histStats.growthData.length > 0 && (
+                <div className="pt-2">
+                  <p className="text-[11px] font-medium text-muted-foreground mb-2">Daily New Sign-Ups ({days}D)</p>
+                  <div className="h-[160px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={histStats.growthData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" vertical={false} />
+                        <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                        <Tooltip />
+                        <Bar dataKey="count" name="New Sign-Ups" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
